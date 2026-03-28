@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { DEPARTMENT_COLORS } from "@/lib/constants";
-import type { Cue, DepartmentRole, ScriptLine } from "@/lib/types";
+import type { Cue, DepartmentRole, LiveConnectionState, ScriptLine } from "@/lib/types";
 import { useLiveChannel } from "@/hooks/useLiveChannel";
 
 const SCENE_ANCHOR_OFFSET = 1000;
@@ -373,6 +375,12 @@ function roleChipColor(role: string) {
   return DEPARTMENT_COLORS[role as DepartmentRole] ?? "#6b7280";
 }
 
+function connectionColor(connectionState: LiveConnectionState) {
+  if (connectionState === "connected") return "bg-emerald-400";
+  if (connectionState === "connecting") return "bg-amber-400";
+  return "bg-rose-500";
+}
+
 function formatDepartmentLabel(value: string) {
   return value
     .replaceAll("_", " ")
@@ -484,6 +492,7 @@ function CommunicationsPanel({
   const [composerOpen, setComposerOpen] = useState(false);
   const targetableDepartments = departments;
   const historyRef = useRef<HTMLDivElement | null>(null);
+  const composerRootRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const historyInitRef = useRef(false);
   const seenHistoryIdsRef = useRef<Set<string>>(new Set());
@@ -522,6 +531,17 @@ function CommunicationsPanel({
 
     return () => window.clearTimeout(timer);
   }, [history]);
+
+  useEffect(() => {
+    if (!composerOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (composerRootRef.current && target && composerRootRef.current.contains(target)) return;
+      setComposerOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [composerOpen]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
@@ -598,7 +618,7 @@ function CommunicationsPanel({
       </div>
 
       <div className="comms-controls grid shrink-0 min-w-0 grid-rows-[auto_auto] gap-2 p-2 pb-1 pt-3">
-        <div className="relative min-w-0">
+        <div ref={composerRootRef} className="relative min-w-0">
           {composerOpen ? (
             <div className="pointer-events-auto absolute bottom-full left-0 right-0 z-50 mb-2">
               <div className="flex w-full max-w-full items-center gap-1 rounded-2xl border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
@@ -687,48 +707,126 @@ function CommunicationsPanel({
 function ActSidebar({
   acts,
   currentAct,
+  showId,
+  role,
+  connectionState,
   onActSelect,
 }: {
   acts: number[];
   currentAct: number;
+  showId: string;
+  role: string;
+  connectionState: LiveConnectionState;
   onActSelect?: (act: number) => void;
 }) {
   const lastPressAtRef = useRef(0);
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
+  const roleMenuRootRef = useRef<HTMLDivElement | null>(null);
+  const router = useRouter();
+  const roleOptions: DepartmentRole[] = ["director", "lighting", "sound", "stage_left", "stage_right", "stage_crew"];
+
+  const goToRole = (nextRole: DepartmentRole) => {
+    setRoleMenuOpen(false);
+    if (nextRole === "director") {
+      router.push(`/shows/${encodeURIComponent(showId)}/live?role=director`);
+      return;
+    }
+    router.push(`/shows/${encodeURIComponent(showId)}/crew?role=${encodeURIComponent(nextRole)}`);
+  };
+
+  useEffect(() => {
+    if (!roleMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (roleMenuRootRef.current && target && roleMenuRootRef.current.contains(target)) return;
+      setRoleMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [roleMenuOpen]);
 
   return (
-    <aside className="rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-lg">
-      <p className="mb-2 text-center text-[11px] uppercase tracking-wide text-zinc-400">Acts</p>
-      <div className="w-full space-y-2">
-        {acts.map((act) => {
-          const active = currentAct === act;
-          const isClickable = Boolean(onActSelect);
-          return (
-            <button
-              key={act}
-              type="button"
-              onPointerUp={(event) => {
-                if (!onActSelect) return;
-                if (event.pointerType === "touch" || event.pointerType === "pen") {
-                  event.preventDefault();
-                  lastPressAtRef.current = Date.now();
-                  onActSelect(act);
-                }
-              }}
-              onClick={() => {
-                if (Date.now() - lastPressAtRef.current < 400) return;
-                onActSelect?.(act);
-              }}
-              style={{ touchAction: "manipulation" }}
-              className={[
-                "min-h-11 w-full rounded py-2 text-center text-xs",
-                active ? "bg-sky-600 text-white" : "bg-zinc-800 text-zinc-200",
-                isClickable ? "cursor-pointer" : "cursor-default",
-              ].join(" ")}
-            >
-              {act}
-            </button>
-          );
-        })}
+    <aside className="box-border grid h-full w-full min-w-0 grid-rows-[minmax(0,1fr)_auto] rounded-xl border border-zinc-800 bg-zinc-900 p-[7px] shadow-lg">
+      <div className="min-w-0">
+        <p className="mb-2 text-center text-[11px] uppercase tracking-wide text-zinc-400">Acts</p>
+        <div className="w-full min-w-0 space-y-2">
+          {acts.map((act) => {
+            const active = currentAct === act;
+            const isClickable = Boolean(onActSelect);
+            return (
+              <button
+                key={act}
+                type="button"
+                onPointerUp={(event) => {
+                  if (!onActSelect) return;
+                  if (event.pointerType === "touch" || event.pointerType === "pen") {
+                    event.preventDefault();
+                    lastPressAtRef.current = Date.now();
+                    onActSelect(act);
+                  }
+                }}
+                onClick={() => {
+                  if (Date.now() - lastPressAtRef.current < 400) return;
+                  onActSelect?.(act);
+                }}
+                style={{ touchAction: "manipulation" }}
+                className={[
+                  "box-border min-h-11 w-full min-w-0 rounded py-2 text-center text-xs",
+                  active ? "bg-sky-600 text-white" : "bg-zinc-800 text-zinc-200",
+                  isClickable ? "cursor-pointer" : "cursor-default",
+                ].join(" ")}
+              >
+                {act}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mt-2 border-t border-zinc-800 pt-2">
+        <div ref={roleMenuRootRef} className="relative flex w-full min-w-0 flex-col items-stretch gap-2">
+          {roleMenuOpen ? (
+            <div className="absolute bottom-full left-0 z-40 mb-2 w-[11rem] rounded-md border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
+              <div className="max-h-40 overflow-y-auto">
+                {roleOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => goToRole(option)}
+                    className={[
+                      "w-full rounded px-2 py-1.5 text-left text-sm leading-tight break-words",
+                      option === role ? "bg-sky-600 text-white" : "text-zinc-200 hover:bg-zinc-800",
+                    ].join(" ")}
+                  >
+                    {formatDepartmentLabel(option)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setRoleMenuOpen((prev) => !prev)}
+            className="w-full min-w-0 text-center text-[11px] font-medium text-zinc-400 hover:text-zinc-200"
+            title="Change role"
+          >
+            {formatDepartmentLabel(role)}
+          </button>
+          <div className="flex w-full items-center justify-center">
+            <span
+              aria-label={`Connection status: ${connectionState}`}
+              title={`Connection: ${connectionState}`}
+              className={`block h-3 w-3 rounded-full ${connectionColor(connectionState)}`}
+            />
+          </div>
+          <Link
+            href="/"
+            aria-label="Home"
+            title="Home"
+            className="box-border flex h-9 w-full min-w-0 items-center justify-center rounded bg-zinc-800 text-base text-zinc-100 hover:bg-zinc-700"
+          >
+            ⌂
+          </Link>
+        </div>
       </div>
     </aside>
   );
@@ -756,7 +854,7 @@ export function DirectorLiveShell({
   lines: ScriptLine[];
   cues: Cue[];
 }) {
-  const { state, events, communications, publish } = useLiveChannel(showId, "director");
+  const { state, events, communications, publish, connectionState } = useLiveChannel(showId, "director");
   const [optimisticPosition, setOptimisticPosition] = useState<{ lineId: number; wordIndex: number } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<UnifiedHistoryItem[]>([]);
   const effectiveOptimisticPosition =
@@ -978,6 +1076,9 @@ export function DirectorLiveShell({
         <ActSidebar
           acts={acts}
           currentAct={viewAct}
+          showId={showId}
+          role="director"
+          connectionState={connectionState}
           onActSelect={(act) => {
             void jumpToAct(act);
           }}
@@ -1080,7 +1181,7 @@ export function CrewLiveShell({
   lines: ScriptLine[];
   cues: Cue[];
 }) {
-  const { state, events, communications, publish } = useLiveChannel(showId, role);
+  const { state, events, communications, publish, connectionState } = useLiveChannel(showId, role);
   const currentLine = state?.currentLineId ?? 1;
   const currentWordIndex = state?.currentWordIndex ?? 0;
   const [pendingMessages, setPendingMessages] = useState<UnifiedHistoryItem[]>([]);
@@ -1199,6 +1300,9 @@ export function CrewLiveShell({
         <ActSidebar
           acts={acts}
           currentAct={viewAct}
+          showId={showId}
+          role={role}
+          connectionState={connectionState}
           onActSelect={(act) => {
             jumpToAct(act);
           }}
