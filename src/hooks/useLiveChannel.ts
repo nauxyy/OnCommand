@@ -25,7 +25,7 @@ export function useLiveChannel(showId: string, role: DepartmentRole) {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [state, setState] = useState<LiveState | null>(null);
   const [communications, setCommunications] = useState<CommunicationsConfig>({
-    departments: ["director", "lighting", "sound", "stage_left", "stage_right", "stage_crew"],
+    departments: ["director", "lighting", "sound", "stage_left", "stage_right", "stage_manager"],
     quickMessages: ["Stand by", "Go now", "Hold", "Repeat cue", "Need confirmation", "Reset to last mark"],
   });
   const [connectionState, setConnectionState] = useState<LiveConnectionState>("connecting");
@@ -48,6 +48,7 @@ export function useLiveChannel(showId: string, role: DepartmentRole) {
         const maybeState = evt.payload as Partial<LiveState>;
         setState((prev) => ({
           showId,
+          liveAccessCode: typeof maybeState.liveAccessCode === "string" ? maybeState.liveAccessCode : prev?.liveAccessCode ?? "",
           currentAct: maybeState.currentAct ?? prev?.currentAct ?? 1,
           currentLineId: maybeState.currentLineId ?? prev?.currentLineId ?? 1,
           currentWordIndex: maybeState.currentWordIndex ?? prev?.currentWordIndex ?? 0,

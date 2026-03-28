@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import { DEPARTMENT_COLORS } from "@/lib/constants";
+import { splitLineWords } from "@/lib/editor/document";
 import type { Cue, DepartmentRole, LiveConnectionState, ScriptLine } from "@/lib/types";
 import { useLiveChannel } from "@/hooks/useLiveChannel";
 
@@ -36,21 +38,28 @@ function useScrollFade<T extends HTMLElement>(axis: "x" | "y") {
     if (!el) return;
 
     const threshold = 1;
+    const maxFadePx = 14;
     const update = () => {
       if (axis === "y") {
-        const canScrollY = el.scrollHeight - el.clientHeight > threshold;
-        const showTop = canScrollY && el.scrollTop > threshold;
-        const showBottom = canScrollY && el.scrollTop < el.scrollHeight - el.clientHeight - threshold;
-        el.dataset.fadeTop = showTop ? "1" : "0";
-        el.dataset.fadeBottom = showBottom ? "1" : "0";
+        const totalScrollable = el.scrollHeight - el.clientHeight;
+        const canScrollY = totalScrollable > threshold;
+        const topDistance = canScrollY ? Math.max(el.scrollTop, 0) : 0;
+        const bottomDistance = canScrollY ? Math.max(totalScrollable - el.scrollTop, 0) : 0;
+        const topFade = Math.min(topDistance, maxFadePx);
+        const bottomFade = Math.min(bottomDistance, maxFadePx);
+        el.style.setProperty("--scroll-fade-top-size", `${topFade}px`);
+        el.style.setProperty("--scroll-fade-bottom-size", `${bottomFade}px`);
         return;
       }
 
-      const canScrollX = el.scrollWidth - el.clientWidth > threshold;
-      const showLeft = canScrollX && el.scrollLeft > threshold;
-      const showRight = canScrollX && el.scrollLeft < el.scrollWidth - el.clientWidth - threshold;
-      el.dataset.fadeLeft = showLeft ? "1" : "0";
-      el.dataset.fadeRight = showRight ? "1" : "0";
+      const totalScrollable = el.scrollWidth - el.clientWidth;
+      const canScrollX = totalScrollable > threshold;
+      const leftDistance = canScrollX ? Math.max(el.scrollLeft, 0) : 0;
+      const rightDistance = canScrollX ? Math.max(totalScrollable - el.scrollLeft, 0) : 0;
+      const leftFade = Math.min(leftDistance, maxFadePx);
+      const rightFade = Math.min(rightDistance, maxFadePx);
+      el.style.setProperty("--scroll-fade-left-size", `${leftFade}px`);
+      el.style.setProperty("--scroll-fade-right-size", `${rightFade}px`);
     };
 
     update();
@@ -75,10 +84,150 @@ function useScrollFade<T extends HTMLElement>(axis: "x" | "y") {
   return ref;
 }
 
+function useLockedViewport() {
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtmlOverflow = html.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyHeight = body.style.height;
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    body.style.height = "100%";
+
+    return () => {
+      html.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
+      body.style.height = previousBodyHeight;
+    };
+  }, []);
+}
+
 function isSceneDirectionCue(cue: Cue) {
-  if (cue.department === "stage_crew" || cue.department === "stage_left" || cue.department === "stage_right") return true;
+  if (cue.department === "stage_manager" || cue.department === "stage_left" || cue.department === "stage_right") return true;
   const text = cue.text.toLowerCase();
   return SCENE_DIRECTION_KEYWORDS.some((kw) => text.includes(kw));
+}
+
+function cueHoverDetails(cue: Cue) {
+  const parts = [
+    `${formatDepartmentLabel(cue.department)}`,
+    cue.text.trim() || "No cue text.",
+  ];
+  if (cue.diagramUrl?.trim()) parts.push("Diagram linked");
+  return parts.join(" · ");
+}
+
+function getReadableTextColor(hexColor: string) {
+  const normalized = hexColor.replace("#", "");
+  if (normalized.length !== 6) return "#111827";
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance > 0.55 ? "#111827" : "#f8fafc";
+}
+
+function InlineCueMarker({
+  cue,
+  role,
+}: {
+  cue: Cue;
+  role: DepartmentRole;
+}) {
+  const color = DEPARTMENT_COLORS[cue.department] ?? "#52525b";
+  const isTechnician = role !== "director";
+  const isRoleCue = cue.department === role;
+  const showTechnicianDetails = isTechnician && isRoleCue;
+  const label = formatDepartmentLabel(cue.department);
+  const detailText = cueHoverDetails(cue);
+  const markerRef = useRef<HTMLSpanElement | null>(null);
+  const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const tooltipTextColor = getReadableTextColor(color);
+
+  useEffect(() => {
+    if (!showTooltip) return;
+
+    const updatePosition = () => {
+      const marker = markerRef.current;
+      const tooltip = tooltipRef.current;
+      if (!marker || !tooltip) return;
+
+      const markerRect = marker.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const viewportPadding = 12;
+      const gap = 8;
+
+      let left = markerRect.left + markerRect.width / 2 - tooltipRect.width / 2;
+      left = Math.max(viewportPadding, Math.min(left, window.innerWidth - tooltipRect.width - viewportPadding));
+
+      let top = markerRect.top - tooltipRect.height - gap;
+      if (top < viewportPadding) {
+        top = markerRect.bottom + gap;
+      }
+      top = Math.max(viewportPadding, Math.min(top, window.innerHeight - tooltipRect.height - viewportPadding));
+
+      setTooltipPosition({ top, left });
+    };
+
+    updatePosition();
+    const onWindowChange = () => updatePosition();
+    window.addEventListener("resize", onWindowChange);
+    window.addEventListener("scroll", onWindowChange, true);
+
+    return () => {
+      window.removeEventListener("resize", onWindowChange);
+      window.removeEventListener("scroll", onWindowChange, true);
+    };
+  }, [showTooltip]);
+
+  return (
+    <span
+      ref={markerRef}
+      onMouseEnter={() => {
+        if (showTechnicianDetails) return;
+        setShowTooltip(true);
+      }}
+      onMouseLeave={() => setShowTooltip(false)}
+      onFocus={() => {
+        if (showTechnicianDetails) return;
+        setShowTooltip(true);
+      }}
+      onBlur={() => setShowTooltip(false)}
+      className={[
+        "relative mx-0.5 inline-flex items-center rounded-lg border px-2.5 py-1 align-middle text-xs font-semibold leading-snug",
+        showTechnicianDetails ? "text-black" : "text-zinc-100",
+      ].join(" ")}
+      style={{
+        borderColor: color,
+        backgroundColor: showTechnicianDetails ? `${color}aa` : `${color}44`,
+      }}
+      tabIndex={showTechnicianDetails ? -1 : 0}
+    >
+      {label}
+      {!showTechnicianDetails && showTooltip
+        ? createPortal(
+            <span
+              ref={tooltipRef}
+              className="pointer-events-none fixed z-[9999] w-[min(24rem,calc(100vw-1.5rem))] rounded-lg border p-3 text-left text-xs font-medium leading-relaxed whitespace-pre-wrap break-words shadow-2xl"
+              style={{
+                top: tooltipPosition.top,
+                left: tooltipPosition.left,
+                borderColor: color,
+                backgroundColor: color,
+                color: tooltipTextColor,
+              }}
+            >
+              {detailText}
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
 }
 
 function ScriptPanel({
@@ -190,12 +339,10 @@ function ScriptPanel({
   }, [currentLineId, currentWordIndex, instantScrollNonce, followRequestNonce, scrollTarget]);
 
   const nextRoleCue = useMemo(
-    () =>
-      cues
-        .filter((cue) => cue.department === role && cue.lineId >= currentLineId)
-        .sort((a, b) => a.lineId - b.lineId)[0],
+    () => cues.filter((cue) => cue.department === role && cue.lineId > currentLineId).map((cue) => cue.lineId),
     [cues, currentLineId, role],
   );
+  const upcomingRoleCueLineIds = useMemo(() => new Set(nextRoleCue), [nextRoleCue]);
   const visibleLines = lines;
   const firstVisibleLine = visibleLines[0];
   const lastVisibleLine = visibleLines[visibleLines.length - 1];
@@ -296,20 +443,45 @@ function ScriptPanel({
               (lastVisibleLine && line.id === lastVisibleLine.id && isEndAnchorActive) ||
               isSceneAnchorActive);
           const lineCues = cues.filter((c) => c.lineId === line.id && !(line.sceneSeparator && isSceneDirectionCue(c)));
-          const roleCueForLine = lineCues.find((cue) => cue.department === role);
-          const isUpcomingCueLine = isTechnician && nextRoleCue && line.id === nextRoleCue.lineId && !isCurrent;
-          const isCurrentCueLine = isTechnician && isCurrent && Boolean(roleCueForLine);
+          const roleCuesForLine = cues
+            .filter((cue) => cue.lineId === line.id && cue.department === role)
+            .sort((a, b) => a.anchorGapIndex - b.anchorGapIndex);
+          const isUpcomingCueLine = isTechnician && upcomingRoleCueLineIds.has(line.id) && !isCurrent;
+          const isCurrentCueLine = isTechnician && line.id === currentLineId && roleCuesForLine.length > 0;
+          const canSelectShowStart = Boolean(firstVisibleLine && onLineSelect);
+          const words = splitLineWords(line.text);
+          const inlineCues = isTechnician ? lineCues.filter((cue) => cue.department === role) : lineCues;
+          const cuesByGap = new Map<number, Cue[]>();
+          inlineCues
+            .slice()
+            .sort((a, b) => (a.anchorGapIndex !== b.anchorGapIndex ? a.anchorGapIndex - b.anchorGapIndex : a.department.localeCompare(b.department)))
+            .forEach((cue) => {
+              const clampedGap = Math.max(0, Math.min(cue.anchorGapIndex, words.length));
+              const next = cuesByGap.get(clampedGap) ?? [];
+              next.push(cue);
+              cuesByGap.set(clampedGap, next);
+            });
 
           return (
             <div key={line.id}>
-              {firstVisibleLine && onLineSelect && line.id === firstVisibleLine.id ? (
+              {firstVisibleLine && line.id === firstVisibleLine.id ? (
                 <div
-                  onClick={() => (onShowStartSelect ? onShowStartSelect(firstVisibleLine) : onLineSelect(firstVisibleLine))}
+                  onClick={() => {
+                    if (!firstVisibleLine || !onLineSelect) return;
+                    if (onShowStartSelect) {
+                      onShowStartSelect(firstVisibleLine);
+                      return;
+                    }
+                    onLineSelect(firstVisibleLine);
+                  }}
                   className={[
-                    "mb-2 w-full cursor-pointer rounded-md border px-3 py-3 text-sm font-medium transition-all duration-300",
+                    "mb-2 w-full rounded-md border px-3 py-3 text-sm font-medium transition-all duration-300",
+                    canSelectShowStart ? "cursor-pointer" : "",
                     currentWordIndex === -1 && currentLineId === firstVisibleLine.id
                       ? "border-white bg-sky-900/35 text-white"
-                      : "border-sky-800 bg-sky-950/25 text-sky-300 hover:bg-sky-900/40",
+                      : canSelectShowStart
+                        ? "border-sky-800 bg-sky-950/25 text-sky-300 hover:bg-sky-900/40"
+                        : "border-sky-800 bg-sky-950/25 text-sky-300",
                   ].join(" ")}
                 >
                   Show starts
@@ -337,16 +509,26 @@ function ScriptPanel({
                   <p>{`Scene ${sceneNumber}. ${line.sceneSeparator}`}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {(() => {
-                      const sceneChangeCues = cues.filter((cue) => cue.lineId === line.id && isSceneDirectionCue(cue));
+                      const sceneChangeCues = cues.filter((cue) => {
+                        if (cue.lineId !== line.id || !isSceneDirectionCue(cue)) return false;
+                        if (isTechnician) return cue.department === role;
+                        return true;
+                      });
                       if (!sceneChangeCues.length) return <span className="text-[11px] text-zinc-400">No scene-change cues</span>;
                       return sceneChangeCues.map((cue) => (
+                        (() => {
+                          const cueColor = DEPARTMENT_COLORS[cue.department] ?? "#71717a";
+                          const isBright = isCurrent || !isPast;
+                          return (
                         <span
                           key={`scene-${line.id}-${cue.id}`}
-                          className="rounded-full px-2 py-1 text-[11px] font-medium text-black"
-                          style={{ backgroundColor: `${DEPARTMENT_COLORS[cue.department]}66` }}
+                          className="rounded-full px-2 py-1 text-[11px] font-medium text-white"
+                          style={{ backgroundColor: isBright ? cueColor : `${cueColor}66` }}
                         >
                           {cue.department}: {cue.text}
                         </span>
+                          );
+                        })()
                       ));
                     })()}
                   </div>
@@ -360,9 +542,9 @@ function ScriptPanel({
                 className={[
                   "ml-8 w-[calc(100%-2rem)] rounded-md border px-3 py-3 transition-all duration-300",
                   onLineSelect ? "cursor-pointer hover:bg-zinc-800/90" : "",
-                  isCurrent ? "border-white bg-zinc-800" : "border-transparent",
-                  isCurrentCueLine ? "bg-emerald-900/35" : "",
-                  isUpcomingCueLine ? "bg-amber-900/35" : "",
+                  isCurrent && !isCurrentCueLine ? "border-white bg-zinc-800" : "border-transparent",
+                  isCurrentCueLine ? "border-emerald-300 bg-emerald-950/80 ring-2 ring-emerald-400/70" : "",
+                  isUpcomingCueLine ? "bg-rose-900/35" : "",
                   isPast ? "text-zinc-600" : isCurrent ? "text-white" : "text-zinc-300",
                 ].join(" ")}
               >
@@ -371,46 +553,63 @@ function ScriptPanel({
                     <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">
                       Act {line.actNumber} · L{line.lineNumber} · {line.character}
                     </p>
-                    <p className={isCurrent ? "mt-1 text-2xl font-semibold leading-snug" : "mt-1 text-lg leading-snug"}>{line.text}</p>
+                    <p className={isCurrent ? "mt-1 text-2xl font-semibold leading-snug" : "mt-1 text-lg leading-snug"}>
+                      {Array.from({ length: words.length + 1 }).map((_, gapIndex) => {
+                        const gapCues = cuesByGap.get(gapIndex) ?? [];
+                        return (
+                          <span key={`line-${line.id}-gap-${gapIndex}`} className="contents">
+                            {gapCues.length && gapIndex > 0 ? " " : null}
+                            {gapCues.map((cue) => (
+                              <InlineCueMarker key={cue.id} cue={cue} role={role} />
+                            ))}
+                            {gapCues.length && gapIndex < words.length ? " " : null}
+                            {gapIndex < words.length ? `${words[gapIndex]} ` : null}
+                          </span>
+                        );
+                      })}
+                    </p>
                   </div>
 
                   {isTechnician && (isCurrentCueLine || isUpcomingCueLine) ? (
                     <div
                       className={[
                         "min-w-44 rounded-md border px-2.5 py-1.5 text-xs font-medium",
-                        isCurrentCueLine ? "border-emerald-400 bg-emerald-200 text-emerald-950" : "border-amber-400 bg-amber-200 text-amber-950",
+                        isCurrentCueLine ? "border-emerald-400 bg-emerald-200 text-emerald-950" : "border-rose-400 bg-rose-200 text-rose-950",
                       ].join(" ")}
                     >
-                      {roleCueForLine?.text ?? nextRoleCue?.text}
+                      <div className="space-y-1">
+                        {roleCuesForLine.length ? (
+                          roleCuesForLine.map((cue) => <p key={cue.id}>{cue.text || "No cue text."}</p>)
+                        ) : (
+                          <p>No cue text.</p>
+                        )}
+                      </div>
                     </div>
                   ) : null}
                 </div>
 
-                {lineCues.length ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {lineCues.map((cue) => (
-                      <span
-                        key={cue.id}
-                        className="rounded-full px-2 py-1 text-[11px] font-medium text-black"
-                        style={{ backgroundColor: `${DEPARTMENT_COLORS[cue.department]}66` }}
-                      >
-                        {cue.department}: {cue.text}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             </div>
           );
         })}
-        {lastVisibleLine && onLineSelect ? (
+        {lastVisibleLine ? (
           <div
-            onClick={() => (onShowEndSelect ? onShowEndSelect(lastVisibleLine) : onLineSelect(lastVisibleLine))}
+            onClick={() => {
+              if (!onLineSelect) return;
+              if (onShowEndSelect) {
+                onShowEndSelect(lastVisibleLine);
+                return;
+              }
+              onLineSelect(lastVisibleLine);
+            }}
             className={[
-              "mt-3 w-full cursor-pointer rounded-md border px-3 py-3 text-sm font-medium transition-all duration-300",
+              "mt-3 w-full rounded-md border px-3 py-3 text-sm font-medium transition-all duration-300",
+              onLineSelect ? "cursor-pointer" : "",
               currentWordIndex === -2 && currentLineId === lastVisibleLine.id
                 ? "border-white bg-rose-900/35 text-white"
-                : "border-rose-800 bg-rose-950/25 text-rose-300 hover:bg-rose-900/40",
+                : onLineSelect
+                  ? "border-rose-800 bg-rose-950/25 text-rose-300 hover:bg-rose-900/40"
+                  : "border-rose-800 bg-rose-950/25 text-rose-300",
             ].join(" ")}
           >
             Show ends
@@ -426,10 +625,14 @@ function roleChipColor(role: string) {
   return DEPARTMENT_COLORS[role as DepartmentRole] ?? "#6b7280";
 }
 
-function connectionColor(connectionState: LiveConnectionState) {
-  if (connectionState === "connected") return "bg-emerald-400";
-  if (connectionState === "connecting") return "bg-amber-400";
-  return "bg-rose-500";
+function connectionIndicatorColors(connectionState: LiveConnectionState) {
+  if (connectionState === "connected") {
+    return { from: "#6ee7b7", to: "#34d399", glow: "rgba(16,185,129,0.65)" };
+  }
+  if (connectionState === "connecting") {
+    return { from: "#fde68a", to: "#f59e0b", glow: "rgba(245,158,11,0.6)" };
+  }
+  return { from: "#fda4af", to: "#f43f5e", glow: "rgba(244,63,94,0.6)" };
 }
 
 function formatDepartmentLabel(value: string) {
@@ -520,6 +723,107 @@ function ShowStatusPanel({
           <p className="text-[11px] uppercase tracking-wide text-zinc-400">Current act</p>
           <p className="min-w-0 truncate whitespace-nowrap text-left text-sm text-zinc-300">{currentActLabel}</p>
         </button>
+      </div>
+    </div>
+  );
+}
+
+type RoleCueSnapshot = {
+  cue: Cue;
+  line: ScriptLine | undefined;
+};
+
+function CueDetailsPanel({
+  role,
+  currentLineId,
+  cues,
+  lines,
+}: {
+  role: DepartmentRole;
+  currentLineId: number;
+  cues: Cue[];
+  lines: ScriptLine[];
+}) {
+  const lineById = useMemo(() => new Map(lines.map((line) => [line.id, line])), [lines]);
+  const activeFadeRef = useScrollFade<HTMLDivElement>("y");
+  const upcomingFadeRef = useScrollFade<HTMLDivElement>("y");
+  const roleCues = useMemo(
+    () =>
+      cues
+        .filter((cue) => cue.department === role)
+        .sort((a, b) => (a.lineId !== b.lineId ? a.lineId - b.lineId : a.anchorGapIndex - b.anchorGapIndex)),
+    [cues, role],
+  );
+
+  const activeNow = useMemo<RoleCueSnapshot[]>(
+    () => roleCues.filter((cue) => cue.lineId === currentLineId).map((cue) => ({ cue, line: lineById.get(cue.lineId) })),
+    [currentLineId, lineById, roleCues],
+  );
+  const lineIndexById = useMemo(() => {
+    const mapping = new Map<number, number>();
+    lines.forEach((line, index) => {
+      mapping.set(line.id, index);
+    });
+    return mapping;
+  }, [lines]);
+  const upcoming = useMemo<RoleCueSnapshot[]>(
+    () => roleCues.filter((cue) => cue.lineId > currentLineId).map((cue) => ({ cue, line: lineById.get(cue.lineId) })),
+    [currentLineId, lineById, roleCues],
+  );
+
+  return (
+    <div className="flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 p-3 shadow-lg">
+      <p className="text-[11px] uppercase tracking-wide text-zinc-400">Cue details</p>
+      <div className="mt-2 grid min-h-0 flex-1 gap-2 md:grid-cols-2">
+        <div className="flex min-h-0 flex-col rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+          <p className="text-xs font-semibold text-emerald-300">Active now</p>
+          <div
+            ref={activeFadeRef}
+            className="script-scroll scroll-fade-y scroll-fade-y-strong mt-1.5 max-h-24 min-h-0 space-y-1.5 overflow-y-auto pr-1"
+          >
+            {activeNow.length ? (
+              activeNow.map(({ cue, line }) => (
+                <div key={cue.id} className="rounded border border-emerald-800/70 bg-emerald-950/25 px-2 py-1.5 text-xs text-zinc-100">
+                  <p className="text-[11px] text-zinc-300">
+                    {line ? `Act ${line.actNumber} · L${line.lineNumber}` : `Line ${cue.lineId}`}
+                  </p>
+                  <p>{cue.text || "No cue text."}</p>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-zinc-500">No active cues on current line.</p>
+            )}
+          </div>
+        </div>
+        <div className="flex min-h-0 flex-col rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+          <p className="text-xs font-semibold text-rose-300">Upcoming</p>
+          <div
+            ref={upcomingFadeRef}
+            className="script-scroll scroll-fade-y scroll-fade-y-strong mt-1.5 max-h-24 min-h-0 space-y-1.5 overflow-y-auto pr-1"
+          >
+            {upcoming.length ? (
+              upcoming.map(({ cue, line }) => (
+                <div key={cue.id} className="rounded border border-rose-800/70 bg-rose-950/25 px-2 py-1.5 text-xs text-zinc-100">
+                  <p className="text-[11px] text-zinc-300">
+                    {line ? `Act ${line.actNumber} · L${line.lineNumber}` : `Line ${cue.lineId}`}
+                  </p>
+                  <p className="text-[11px] text-rose-200">
+                    {(() => {
+                      const cueLineIndex = lineIndexById.get(cue.lineId);
+                      const currentLineIndex = lineIndexById.get(currentLineId);
+                      if (typeof cueLineIndex !== "number" || typeof currentLineIndex !== "number") return "Upcoming cue";
+                      const linesUntil = Math.max(cueLineIndex - currentLineIndex, 0);
+                      return `${linesUntil} line${linesUntil === 1 ? "" : "s"} until cue`;
+                    })()}
+                  </p>
+                  <p>{cue.text || "No cue text."}</p>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-zinc-500">No upcoming cues for this role.</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -674,7 +978,7 @@ function CommunicationsPanel({
         </div>
       </div>
 
-      <div className="comms-controls grid shrink-0 min-w-0 grid-rows-[auto_auto] gap-2 p-2 pb-1 pt-3">
+      <div className="comms-controls grid shrink-0 min-w-0 grid-rows-[auto_auto] gap-2 p-2 pt-3">
         <div ref={composerRootRef} className="relative min-w-0">
           {composerOpen ? (
             <div className="pointer-events-auto absolute bottom-full left-0 right-0 z-50 mb-2">
@@ -769,6 +1073,7 @@ function ActSidebar({
   acts,
   currentAct,
   showId,
+  liveAccessCode,
   role,
   connectionState,
   onActSelect,
@@ -776,16 +1081,22 @@ function ActSidebar({
   acts: number[];
   currentAct: number;
   showId: string;
+  liveAccessCode?: string;
   role: string;
   connectionState: LiveConnectionState;
   onActSelect?: (act: number) => void;
 }) {
   const lastPressAtRef = useRef(0);
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const roleMenuRootRef = useRef<HTMLDivElement | null>(null);
+  const shareMenuRootRef = useRef<HTMLDivElement | null>(null);
   const roleMenuFadeRef = useScrollFade<HTMLDivElement>("y");
   const router = useRouter();
-  const roleOptions: DepartmentRole[] = ["director", "lighting", "sound", "stage_left", "stage_right", "stage_crew"];
+  const roleOptions: DepartmentRole[] =
+    role === "director"
+      ? ["director", "lighting", "sound", "stage_left", "stage_right", "stage_manager"]
+      : ["lighting", "sound", "stage_left", "stage_right", "stage_manager"];
 
   const goToRole = (nextRole: DepartmentRole) => {
     setRoleMenuOpen(false);
@@ -806,6 +1117,22 @@ function ActSidebar({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [roleMenuOpen]);
+
+  useEffect(() => {
+    if (!shareMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (shareMenuRootRef.current && target && shareMenuRootRef.current.contains(target)) return;
+      setShareMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [shareMenuOpen]);
+
+  const shareCode = liveAccessCode?.trim() || showId;
+  const showLink = `/shows/${encodeURIComponent(showId)}`;
+  const crewJoinLink = `/shows/${encodeURIComponent(shareCode)}/crew?role=lighting`;
+  const indicatorColors = connectionIndicatorColors(connectionState);
 
   return (
     <aside className="box-border grid h-full w-full min-w-0 grid-rows-[minmax(0,1fr)_auto] rounded-xl border border-zinc-800 bg-zinc-900 p-[7px] shadow-lg">
@@ -874,11 +1201,46 @@ function ActSidebar({
             {formatDepartmentLabel(role)}
           </button>
           <div className="flex w-full items-center justify-center">
-            <span
-              aria-label={`Connection status: ${connectionState}`}
-              title={`Connection: ${connectionState}`}
-              className={`block h-3 w-3 rounded-full ${connectionColor(connectionState)}`}
-            />
+            <div ref={shareMenuRootRef} className="relative">
+              {shareMenuOpen ? (
+                <div className="absolute left-full top-1/2 z-50 ml-2 w-56 -translate-y-1/2 rounded-md border border-zinc-700 bg-zinc-900 p-2 shadow-xl">
+                  <p className="text-[10px] uppercase tracking-wide text-zinc-400">Connect to this show</p>
+                  <p className="mt-1 break-all text-xs text-zinc-300">Code: {shareCode}</p>
+                  <Link
+                    href={showLink}
+                    className="mt-2 block rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 hover:bg-zinc-700"
+                  >
+                    {showLink}
+                  </Link>
+                  <Link
+                    href={crewJoinLink}
+                    className="mt-1 block rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 hover:bg-zinc-700"
+                  >
+                    {crewJoinLink}
+                  </Link>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                aria-label={`Connection status: ${connectionState}. Click to view show link.`}
+                title={`Connection: ${connectionState}`}
+                onClick={() => setShareMenuOpen((prev) => !prev)}
+                className="relative inline-flex h-4 w-4 items-center justify-center"
+              >
+                <span
+                  className="pointer-events-none absolute inset-0 rounded-full blur-[4px]"
+                  style={{
+                    background: `radial-gradient(circle, ${indicatorColors.glow} 0%, rgba(0,0,0,0) 70%)`,
+                  }}
+                />
+                <span
+                  className="relative block h-3 w-3 rounded-full border border-white/20 shadow-[0_0_10px_rgba(255,255,255,0.2)]"
+                  style={{
+                    background: `linear-gradient(135deg, ${indicatorColors.from} 0%, ${indicatorColors.to} 100%)`,
+                  }}
+                />
+              </button>
+            </div>
           </div>
           <Link
             href="/"
@@ -916,6 +1278,7 @@ export function DirectorLiveShell({
   lines: ScriptLine[];
   cues: Cue[];
 }) {
+  useLockedViewport();
   const { state, events, communications, publish, connectionState } = useLiveChannel(showId, "director");
   const [optimisticPosition, setOptimisticPosition] = useState<{ lineId: number; wordIndex: number } | null>(null);
   const [pendingMessages, setPendingMessages] = useState<UnifiedHistoryItem[]>([]);
@@ -1139,6 +1502,7 @@ export function DirectorLiveShell({
           acts={acts}
           currentAct={viewAct}
           showId={showId}
+          liveAccessCode={state?.liveAccessCode}
           role="director"
           connectionState={connectionState}
           onActSelect={(act) => {
@@ -1179,32 +1543,6 @@ export function DirectorLiveShell({
             >
               Advance line
             </button>
-            <button
-              className="rounded-md border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs text-zinc-100"
-              onClick={() =>
-                publish({
-                  type: "cue.standby",
-                  sourceRole: "director",
-                  targetRoles: ["lighting", "sound", "stage_left", "stage_right", "stage_crew"],
-                  payload: { text: "Standby next cue" },
-                })
-              }
-            >
-              Send standby
-            </button>
-            <button
-              className="rounded-md bg-emerald-300 px-3 py-2 text-xs font-semibold text-black"
-              onClick={() =>
-                publish({
-                  type: "cue.go",
-                  sourceRole: "director",
-                  targetRoles: ["lighting", "sound", "stage_left", "stage_right", "stage_crew"],
-                  payload: { text: "Go cue" },
-                })
-              }
-            >
-              Send go
-            </button>
           </div>
         </section>
 
@@ -1243,6 +1581,7 @@ export function CrewLiveShell({
   lines: ScriptLine[];
   cues: Cue[];
 }) {
+  useLockedViewport();
   const { state, events, communications, publish, connectionState } = useLiveChannel(showId, role);
   const currentLine = state?.currentLineId ?? 1;
   const currentWordIndex = state?.currentWordIndex ?? 0;
@@ -1363,23 +1702,32 @@ export function CrewLiveShell({
           acts={acts}
           currentAct={viewAct}
           showId={showId}
+          liveAccessCode={state?.liveAccessCode}
           role={role}
           connectionState={connectionState}
           onActSelect={(act) => {
             jumpToAct(act);
           }}
         />
-        <ScriptPanel
-          lines={lines}
-          cues={cues}
-          currentLineId={currentLine}
-          currentWordIndex={currentWordIndex}
-          role={role}
-          instantScrollNonce={instantScrollNonce}
-          followRequestNonce={followRequestNonce}
-          scrollTarget={scrollTarget ?? undefined}
-          onViewActChange={setViewAct}
-        />
+        <section className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2">
+          <ScriptPanel
+            lines={lines}
+            cues={cues}
+            currentLineId={currentLine}
+            currentWordIndex={currentWordIndex}
+            role={role}
+            instantScrollNonce={instantScrollNonce}
+            followRequestNonce={followRequestNonce}
+            scrollTarget={scrollTarget ?? undefined}
+            onViewActChange={setViewAct}
+          />
+          <CueDetailsPanel
+            role={role}
+            currentLineId={currentLine}
+            cues={cues}
+            lines={lines}
+          />
+        </section>
 
         <section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden">
           <ShowStatusPanel

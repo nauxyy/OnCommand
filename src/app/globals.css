@@ -8,7 +8,8 @@ body {
 
 html,
 body {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: none;
 }
 
@@ -65,9 +66,6 @@ body {
   --scroll-fade-bottom-size: 0px;
   --scroll-fade-top-mid: calc(var(--scroll-fade-top-size) * 0.55);
   --scroll-fade-bottom-mid: calc(var(--scroll-fade-bottom-size) * 0.55);
-  transition:
-    --scroll-fade-top-size 180ms ease-out,
-    --scroll-fade-bottom-size 180ms ease-out;
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
@@ -93,22 +91,11 @@ body {
   --scroll-fade-bottom-mid: calc(var(--scroll-fade-bottom-size) * 0.35);
 }
 
-.scroll-fade-y[data-fade-top="1"] {
-  --scroll-fade-top-size: var(--scroll-fade-size);
-}
-
-.scroll-fade-y[data-fade-bottom="1"] {
-  --scroll-fade-bottom-size: var(--scroll-fade-size);
-}
-
 .scroll-fade-x {
   --scroll-fade-left-size: 0px;
   --scroll-fade-right-size: 0px;
   --scroll-fade-left-mid: calc(var(--scroll-fade-left-size) * 0.55);
   --scroll-fade-right-mid: calc(var(--scroll-fade-right-size) * 0.55);
-  transition:
-    --scroll-fade-left-size 180ms ease-out,
-    --scroll-fade-right-size 180ms ease-out;
   -webkit-mask-image: linear-gradient(
     to right,
     transparent 0,
@@ -127,14 +114,6 @@ body {
     rgb(0 0 0 / 45%) calc(100% - var(--scroll-fade-right-mid)),
     transparent 100%
   );
-}
-
-.scroll-fade-x[data-fade-left="1"] {
-  --scroll-fade-left-size: var(--scroll-fade-size);
-}
-
-.scroll-fade-x[data-fade-right="1"] {
-  --scroll-fade-right-size: var(--scroll-fade-size);
 }
 
 @keyframes comms-pop-in {
@@ -197,9 +176,10 @@ body {
 }
 
 body {
-  background: var(--background);
+  background: #020617;
   color: var(--foreground);
   font-family: var(--font-sans);
+  min-height: 100dvh;
 }
 
 * {

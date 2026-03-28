@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { hasSupabaseEnv } from "@/lib/env";
 import type { DepartmentRole } from "@/lib/types";
 
-const ROLES: DepartmentRole[] = ["director", "lighting", "sound", "stage_left", "stage_right", "stage_crew"];
+const ROLES: DepartmentRole[] = ["lighting", "sound", "stage_left", "stage_right", "stage_manager"];
 
 export function AnonymousAuthGate() {
   const router = useRouter();
@@ -14,10 +15,10 @@ export function AnonymousAuthGate() {
   const [isCheckingSession, setIsCheckingSession] = useState(hasSupabaseEnv());
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState<string>("");
-  const [role, setRole] = useState<DepartmentRole>("director");
-  const [showId, setShowId] = useState("demo-show");
-  const [title, setTitle] = useState("Tonight Performance");
+  const [role, setRole] = useState<DepartmentRole>("lighting");
+  const [showId, setShowId] = useState(hasSupabaseEnv() ? "" : "demo-show");
 
   const disabled = useMemo(() => !showId.trim(), [showId]);
 
@@ -61,7 +62,7 @@ export function AnonymousAuthGate() {
     const { error } = await supabase.auth.signInAnonymously();
     if (!error) {
       setIsAuthed(true);
-      setStatusText("Signed in. Preparing live session…");
+      setStatusText("Signed in. Open your shows workspace to create or edit a production.");
       setIsSigningIn(false);
       return;
     }
@@ -71,17 +72,44 @@ export function AnonymousAuthGate() {
     setIsSigningIn(false);
   };
 
-  const start = () => {
-    if (role === "director") {
-      router.push(`/shows/${encodeURIComponent(showId)}/live?role=director&title=${encodeURIComponent(title)}`);
-      return;
+  const start = async () => {
+    const entered = showId.trim();
+    if (!entered) return;
+    setJoinError(null);
+
+    if (/^[a-z0-9]{5}$/i.test(entered)) {
+      try {
+        const normalized = entered.toUpperCase();
+        const response = await fetch(`/api/live/resolve-code/${encodeURIComponent(normalized)}`, { cache: "no-store" });
+        if (!response.ok) {
+          setJoinError("Live code not found. Ask the director for the latest 5-character code.");
+          return;
+        }
+        const payload = (await response.json()) as { showId?: string };
+        if (!payload.showId) {
+          setJoinError("Live code lookup failed. Please try again.");
+          return;
+        }
+        router.push(`/shows/${encodeURIComponent(payload.showId)}/crew?role=${role}`);
+        return;
+      } catch (error) {
+        console.error("[AnonymousAuthGate] code resolve failed:", error);
+        setJoinError("Could not resolve live code right now.");
+        return;
+      }
     }
-    router.push(`/shows/${encodeURIComponent(showId)}/crew?role=${role}`);
+
+    router.push(`/shows/${encodeURIComponent(entered)}/crew?role=${role}`);
   };
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-white shadow-lg">
-      <h2 className="text-2xl font-semibold text-white">Start Session</h2>
+      <div className="space-y-2">
+        <h2 className="text-2xl font-semibold text-white">Workspace access</h2>
+        <p className="text-sm text-zinc-300">
+          Sign in, open the shows workspace, create a production, and then join director or crew live mode from a saved show.
+        </p>
+      </div>
       {!hasSupabaseEnv() ? (
         <p className="rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-900">
           Running in demo mode. Add Supabase keys in `.env.local` to enable anonymous auth + database.
@@ -121,20 +149,23 @@ export function AnonymousAuthGate() {
         </div>
       ) : (
         <>
-          <label className="flex flex-col gap-2 text-sm">
-            Show title
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-white"
-            />
-          </label>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/shows" className="rounded-md bg-sky-300 px-4 py-2 text-sm font-semibold text-black">
+              Open Shows Workspace
+            </Link>
+            {!hasSupabaseEnv() ? (
+              <Link href="/shows/demo-show/edit" className="rounded-md border border-zinc-600 bg-zinc-800 px-4 py-2 text-sm font-semibold text-zinc-100">
+                Open Demo Editor
+              </Link>
+            ) : null}
+          </div>
 
           <label className="flex flex-col gap-2 text-sm">
-            Show ID
+            Quick join show ID
             <input
               value={showId}
               onChange={(e) => setShowId(e.target.value)}
+              placeholder={hasSupabaseEnv() ? "Enter 5-character code or show ID" : "demo-show"}
               className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-white"
             />
           </label>
@@ -151,12 +182,15 @@ export function AnonymousAuthGate() {
           </label>
 
           <button
-            onClick={start}
+            onClick={() => {
+              void start();
+            }}
             disabled={disabled}
             className="rounded-md bg-emerald-300 px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:bg-emerald-200"
           >
-            Enter live mode
+            Join live session
           </button>
+          {joinError ? <p className="text-xs text-rose-300">{joinError}</p> : null}
         </>
       )}
     </section>

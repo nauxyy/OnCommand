@@ -114,6 +114,11 @@ Before marking a task complete, confirm:
 
 <!-- Add entries here as issues are discovered. Format: **Short title** — what happened, what to do instead. -->
 - **Supabase cookie writes in Server Components** — `createServerSupabaseClient()` must wrap `setAll` in a try-catch. Server Components can't modify cookies; only Server Actions, Route Handlers, and Middleware can. The middleware handles token refresh on the next request, so silently catching here is safe.
+- **Supabase anonymous auth uses the authenticated DB role** — policies for anonymous sign-in sessions must target `authenticated` and use `auth.uid()`, not `anon`.
+- **Cue drop dialog cancel behavior** — when a cue is created on drag-drop and the instruction dialog is dismissed empty, remove that cue immediately to avoid leaving blank ghost cues in the script.
+- **HTML5 drag payload compatibility** — for reliable drop in inline script text, write cue payloads to multiple dataTransfer types (`application/x-*`, `application/json`, and `text/plain`) and parse all of them on drop.
+- **Editor save performance** — avoid per-row Supabase inserts for scenes/lines/cues. Batch inserts in chunks and fetch inserted rows once to build ID maps; this reduces large-show save times dramatically.
+- **No stage-direction line mode** — this project now treats all script lines as dialogue-style lines and uses cue chips for operational actions; keep stage-direction UI/actions disabled to avoid mixed workflows.
 
 
 <!-- END:nextjs-agent-rules -->

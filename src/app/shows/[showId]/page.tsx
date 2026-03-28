@@ -7,6 +7,9 @@ export default async function ShowHubPage(props: { params: Promise<{ showId: str
 
   return (
     <main className="min-h-screen bg-slate-950 p-6 text-white">
+      <Link href="/" className="mb-4 block text-2xl font-bold tracking-wide text-zinc-200 hover:text-white">
+        OnCommand
+      </Link>
       <div className="mx-auto max-w-4xl space-y-4">
         <Link href="/shows" className="inline-block rounded border border-zinc-700 bg-zinc-900 px-3 py-1 text-sm text-zinc-100">
           ← Back to Shows
