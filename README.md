@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OnCommand
 
-## Getting Started
+Real-time execution system for live theatre production calling.
 
-First, run the development server:
+## Stack
+
+- Next.js 16 (App Router)
+- React 19
+- Tailwind CSS 4
+- Supabase Postgres + Auth (anonymous auth)
+- Server-driven live sync via Next.js APIs (SSE + publish endpoint)
+
+## Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Configure environment:
+
+```bash
+cp .env.example .env.local
+```
+
+Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+
+3. Apply DB schema to Supabase SQL editor:
+
+- `supabase/schema.sql`
+
+4. Start dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Routing
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `/` home + anonymous auth gate
+- `/shows` show list
+- `/shows/[showId]/edit` cue planning view
+- `/shows/[showId]/live` director live mode
+- `/shows/[showId]/crew?role=lighting` crew live mode
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Live sync strategy
 
-## Learn More
+This project intentionally does **not** use Supabase Realtime for cue sync.
 
-To learn more about Next.js, take a look at the following resources:
+- `GET /api/live/[showId]/events` opens server-sent events stream
+- `POST /api/live/[showId]/publish` publishes events
+- In-memory bus fans out events to subscribers
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+For production, replace the in-memory bus with Redis pub/sub or a dedicated WebSocket gateway to support horizontal scaling.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## OCR + script parsing target
 
-## Deploy on Vercel
+Planned ingestion path:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `.txt`: direct parse into lines + character labels
+- `.pdf`: per-page OCR with Tesseract, then dialogue segmentation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The current scaffold includes schema and UI placeholders for this flow.
