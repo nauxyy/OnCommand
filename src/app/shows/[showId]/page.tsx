@@ -30,6 +30,9 @@ export default async function ShowHubPage(props: { params: Promise<{ showId: str
             <Link href={`/shows/${showId}/crew?role=lighting`} className="rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-zinc-100">
               Crew View
             </Link>
+            <Link href={`/shows/${showId}/delete`} className="rounded border border-rose-700 bg-rose-950/50 px-3 py-2 text-rose-100">
+              Delete Show
+            </Link>
           </div>
         </section>
       </div>

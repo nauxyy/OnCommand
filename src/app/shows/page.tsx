@@ -28,6 +28,9 @@ export default async function ShowsPage() {
                 <Link className="rounded bg-emerald-300 px-2 py-1 font-semibold text-black" href={`/shows/${show.id}/live?role=director`}>
                   Live
                 </Link>
+                <Link className="rounded border border-rose-700 bg-rose-950/50 px-2 py-1 text-rose-100" href={`/shows/${show.id}/delete`}>
+                  Delete
+                </Link>
               </div>
             </div>
           ))}

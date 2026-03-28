@@ -2,14 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createShowForCurrentUser, renameShowTitleForCurrentUser, saveShowEditorDraftForCurrentUser } from "@/lib/data/shows";
+import {
+  createShowForCurrentUser,
+  deleteShowForCurrentUser,
+  getShowEditorData,
+  renameShowTitleForCurrentUser,
+  saveShowEditorDraftForCurrentUser,
+} from "@/lib/data/shows";
 import { normalizeEditorDraft } from "@/lib/editor/document";
 import type { ShowEditorDraft } from "@/lib/types";
-
-const createShowInputSchema = z.object({
-  title: z.string().trim().min(1).max(120),
-  sourceText: z.string().max(200_000).optional(),
-});
 
 const cueSchema = z.object({
   id: z.string().min(1),
@@ -52,20 +53,52 @@ const showDraftSchema = z.object({
   ),
 });
 
+const createShowInputSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  sourceText: z.string().max(200_000).optional(),
+  importedDraft: showDraftSchema.optional(),
+});
+
 const renameShowSchema = z.object({
   showId: z.string().trim().min(1),
   title: z.string().trim().min(1).max(120),
 });
 
-export async function createShowAction(input: { title: string; sourceText?: string }) {
+const deleteShowSchema = z.object({
+  showId: z.string().trim().min(1),
+});
+
+export async function createShowAction(input: { title: string; sourceText?: string; importedDraft?: ShowEditorDraft }) {
   const parsed = createShowInputSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false as const, error: "Enter a show title before creating the show." };
   }
 
-  const result = await createShowForCurrentUser(parsed.data);
+  const result = await createShowForCurrentUser({
+    title: parsed.data.title,
+    sourceText: parsed.data.importedDraft?.sourceText ?? parsed.data.sourceText,
+  });
   if (!result.ok) {
     return result;
+  }
+
+  if (parsed.data.importedDraft && result.showId) {
+    const createdEditor = await getShowEditorData(result.showId);
+    if (!createdEditor) {
+      return { ok: false as const, error: "Show was created, but failed to initialize imported cues." };
+    }
+
+    const imported = normalizeEditorDraft({
+      ...parsed.data.importedDraft,
+      showId: result.showId,
+      title: parsed.data.title,
+      revision: createdEditor.revision,
+    });
+
+    const saveResult = await saveShowEditorDraftForCurrentUser(imported);
+    if (!saveResult.ok) {
+      return { ok: false as const, error: saveResult.error ?? "Failed to import cue data into the new show." };
+    }
   }
 
   revalidatePath("/shows");
@@ -99,6 +132,25 @@ export async function renameShowTitleAction(input: { showId: string; title: stri
   }
 
   const result = await renameShowTitleForCurrentUser(parsed.data);
+  if (!result.ok) {
+    return result;
+  }
+
+  revalidatePath("/shows");
+  revalidatePath(`/shows/${parsed.data.showId}`);
+  revalidatePath(`/shows/${parsed.data.showId}/edit`);
+  revalidatePath(`/shows/${parsed.data.showId}/live`);
+  revalidatePath(`/shows/${parsed.data.showId}/crew`);
+  return result;
+}
+
+export async function deleteShowAction(input: { showId: string }) {
+  const parsed = deleteShowSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: "Invalid show ID." };
+  }
+
+  const result = await deleteShowForCurrentUser(parsed.data.showId);
   if (!result.ok) {
     return result;
   }

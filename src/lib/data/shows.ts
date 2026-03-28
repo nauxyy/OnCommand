@@ -1252,6 +1252,49 @@ export async function renameShowTitleForCurrentUser(input: { showId: string; tit
   return { ok: true as const };
 }
 
+export async function deleteShowForCurrentUser(showIdInput: string) {
+  const showId = showIdInput.trim();
+
+  if (!showId) {
+    return { ok: false as const, error: "Show ID is required." };
+  }
+
+  if (showId === "demo-show") {
+    return { ok: false as const, error: "The demo show cannot be deleted." };
+  }
+
+  if (!isUuidLike(showId)) {
+    return { ok: false as const, error: "Invalid show ID." };
+  }
+
+  if (!hasSupabaseEnv()) {
+    return { ok: false as const, error: "Supabase must be configured before deleting shows." };
+  }
+
+  const { supabase, userId } = await getCurrentUserId();
+  if (!userId) {
+    return { ok: false as const, error: "You must sign in before deleting a show." };
+  }
+
+  const membership = await verifyShowMembership(showId, userId);
+  if (!membership || membership.role !== "director") {
+    return { ok: false as const, error: "Only the director can delete this show." };
+  }
+
+  console.log("[deleteShowForCurrentUser]", { showId, userId });
+
+  const { error } = await supabase.from("shows").delete().eq("id", showId);
+  if (error) {
+    console.error("[deleteShowForCurrentUser] delete failed:", { showId, userId, error: formatSupabaseError(error) });
+    return {
+      ok: false as const,
+      error: getUserFacingSupabaseErrorMessage(error, "Failed to delete show."),
+    };
+  }
+
+  return { ok: true as const };
+}
+
 export async function getScriptAndCues(showId: string): Promise<{ script: ScriptLine[]; cues: Cue[] }> {
   if (showId === "demo-show") {
     const editor = getDemoEditorData(showId);

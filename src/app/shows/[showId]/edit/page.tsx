@@ -14,10 +14,10 @@ export default async function ShowEditPage(props: { params: Promise<{ showId: st
 
   return (
     <main className="flex-1 bg-slate-950 p-4 pb-10 text-white">
-      <Link href="/" className="mb-4 block text-2xl font-bold tracking-wide text-zinc-200 hover:text-white">
-        OnCommand
-      </Link>
       <div className="mx-auto max-w-7xl space-y-4">
+        <Link href="/" className="mb-2 block text-2xl font-bold tracking-wide text-zinc-200 hover:text-white">
+          OnCommand
+        </Link>
         <ShowEditHeader showId={showId} initialTitle={editorData.title} />
 
         <ShowEditor key={`${editorData.revision}-${editorData.title}`} initialData={editorData} />

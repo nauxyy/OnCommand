@@ -1678,6 +1678,25 @@ export function ShowEditor({ initialData }: { initialData: ShowEditorData }) {
                                     </button>
                                     <button
                                       type="button"
+                                      onPointerDown={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        setLineMenuId(null);
+                                        openConfirmDialog({
+                                          title: "Delete line?",
+                                          description: `This will remove "${(line.character || "Speaker").trim()}: ${line.text.trim() || "(empty line)"}" and all cues on it.`,
+                                          onConfirm: () =>
+                                            applyDraftUpdate((next) => {
+                                              next.acts[actIndex].scenes[sceneIndex].lines.splice(lineIndex, 1);
+                                              if (selectedCue?.lineId === line.id) {
+                                                setSelectedCue(null);
+                                              }
+                                              if (expandedLineId === line.id) {
+                                                setExpandedLineId(null);
+                                              }
+                                            }),
+                                        });
+                                      }}
                                       onClick={() => {
                                         setLineMenuId(null);
                                         openConfirmDialog({

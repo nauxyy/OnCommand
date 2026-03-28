@@ -4,16 +4,19 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createShowAction } from "@/app/actions/shows";
 import { parseProprietaryShowDraft, PROPRIETARY_SCRIPT_EXTENSION } from "@/lib/editor/proprietary-format";
+import type { ShowEditorDraft } from "@/lib/types";
 
 export function ShowCreateForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [sourceText, setSourceText] = useState("");
+  const [importedDraft, setImportedDraft] = useState<ShowEditorDraft | null>(null);
   const [showImportPopup, setShowImportPopup] = useState(false);
-  const [importMode, setImportMode] = useState<"file" | "text">("file");
+  const [importMode, setImportMode] = useState<"none" | "text">("none");
   const [error, setError] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const onscriptFileInputRef = useRef<HTMLInputElement | null>(null);
+  const textFileInputRef = useRef<HTMLInputElement | null>(null);
   const [isPending, startTransition] = useTransition();
 
   return (
@@ -37,9 +40,9 @@ export function ShowCreateForm() {
         </label>
 
         <input
-          ref={fileInputRef}
+          ref={onscriptFileInputRef}
           type="file"
-          accept={`.txt,.text,${PROPRIETARY_SCRIPT_EXTENSION},application/json,text/plain`}
+          accept={`${PROPRIETARY_SCRIPT_EXTENSION},application/json,text/plain`}
           className="hidden"
           onChange={(event) => {
             const file = event.target.files?.[0];
@@ -50,21 +53,50 @@ export function ShowCreateForm() {
               .text()
               .then((content) => {
                 const proprietary = parseProprietaryShowDraft(content);
-                if (proprietary.ok) {
-                  setTitle((previous) => proprietary.draft.title || previous);
-                  setSourceText(proprietary.draft.sourceText);
-                  setImportMessage(`Imported ${file.name} (${PROPRIETARY_SCRIPT_EXTENSION})`);
+                if (!proprietary.ok) {
+                  setError(`Invalid ${PROPRIETARY_SCRIPT_EXTENSION} file.`);
                   return;
                 }
-                setSourceText(content);
-                setImportMessage(`Imported ${file.name} as plain script text`);
+                setTitle((previous) => proprietary.draft.title || previous);
+                setSourceText(proprietary.draft.sourceText);
+                setImportedDraft(proprietary.draft);
+                setImportMessage(`Imported ${file.name} (${PROPRIETARY_SCRIPT_EXTENSION})`);
+                setShowImportPopup(false);
               })
               .catch((importError) => {
                 console.error("[ShowCreateForm] import failed:", importError);
                 setError("Failed to import script file.");
               })
               .finally(() => {
-                if (fileInputRef.current) fileInputRef.current.value = "";
+                if (onscriptFileInputRef.current) onscriptFileInputRef.current.value = "";
+              });
+          }}
+        />
+
+        <input
+          ref={textFileInputRef}
+          type="file"
+          accept=".txt,.text,text/plain"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            setError(null);
+            setImportMessage(null);
+            file
+              .text()
+              .then((content) => {
+                setSourceText(content);
+                setImportedDraft(null);
+                setImportMessage(`Imported ${file.name} as plain script text`);
+                setShowImportPopup(false);
+              })
+              .catch((importError) => {
+                console.error("[ShowCreateForm] import failed:", importError);
+                setError("Failed to import script file.");
+              })
+              .finally(() => {
+                if (textFileInputRef.current) textFileInputRef.current.value = "";
               });
           }}
         />
@@ -86,6 +118,7 @@ export function ShowCreateForm() {
                 const result = await createShowAction({
                   title,
                   sourceText,
+                  importedDraft: importedDraft ?? undefined,
                 });
 
                 if (!result.ok || !result.showId) {
@@ -128,13 +161,23 @@ export function ShowCreateForm() {
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
-                onClick={() => setImportMode("file")}
+                onClick={() => onscriptFileInputRef.current?.click()}
                 className={[
                   "rounded-md px-3 py-1.5 text-sm font-medium",
-                  importMode === "file" ? "bg-sky-600 text-white" : "border border-zinc-700 bg-zinc-800 text-zinc-100",
+                  "border border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
                 ].join(" ")}
               >
                 .onscript file
+              </button>
+              <button
+                type="button"
+                onClick={() => textFileInputRef.current?.click()}
+                className={[
+                  "rounded-md px-3 py-1.5 text-sm font-medium",
+                  "border border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
+                ].join(" ")}
+              >
+                .txt file
               </button>
               <button
                 type="button"
@@ -148,28 +191,21 @@ export function ShowCreateForm() {
               </button>
             </div>
 
-            {importMode === "file" ? (
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-100"
-                >
-                  Choose .onscript or text file
-                </button>
-              </div>
-            ) : (
+            {importMode === "text" ? (
               <label className="mt-4 flex flex-col gap-2 text-sm text-zinc-100">
                 Paste script text
                 <textarea
                   value={sourceText}
-                  onChange={(event) => setSourceText(event.target.value)}
+                  onChange={(event) => {
+                    setSourceText(event.target.value);
+                    setImportedDraft(null);
+                  }}
                   placeholder={`ACT I\nSCENE 1: Prologue\nARI: Why do all the clocks here tick at different speeds?\n[Lights shift to blue]`}
                   rows={12}
                   className="min-h-56 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-white outline-none focus:border-sky-500"
                 />
               </label>
-            )}
+            ) : null}
           </div>
         </div>
       ) : null}
