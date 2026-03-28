@@ -31,6 +31,112 @@ body {
   border: 2px solid transparent;
 }
 
+.scroll-fade-y,
+.scroll-fade-x {
+  --scroll-fade-size: 14px;
+}
+
+@property --scroll-fade-top-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-bottom-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-left-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-right-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.scroll-fade-y {
+  --scroll-fade-top-size: 0px;
+  --scroll-fade-bottom-size: 0px;
+  --scroll-fade-top-mid: calc(var(--scroll-fade-top-size) * 0.55);
+  --scroll-fade-bottom-mid: calc(var(--scroll-fade-bottom-size) * 0.55);
+  transition:
+    --scroll-fade-top-size 180ms ease-out,
+    --scroll-fade-bottom-size 180ms ease-out;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgb(0 0 0 / 45%) var(--scroll-fade-top-mid),
+    #000 var(--scroll-fade-top-size),
+    #000 calc(100% - var(--scroll-fade-bottom-size)),
+    rgb(0 0 0 / 45%) calc(100% - var(--scroll-fade-bottom-mid)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgb(0 0 0 / 45%) var(--scroll-fade-top-mid),
+    #000 var(--scroll-fade-top-size),
+    #000 calc(100% - var(--scroll-fade-bottom-size)),
+    rgb(0 0 0 / 45%) calc(100% - var(--scroll-fade-bottom-mid)),
+    transparent 100%
+  );
+}
+
+.scroll-fade-y-strong {
+  --scroll-fade-top-mid: calc(var(--scroll-fade-top-size) * 0.35);
+  --scroll-fade-bottom-mid: calc(var(--scroll-fade-bottom-size) * 0.35);
+}
+
+.scroll-fade-y[data-fade-top="1"] {
+  --scroll-fade-top-size: var(--scroll-fade-size);
+}
+
+.scroll-fade-y[data-fade-bottom="1"] {
+  --scroll-fade-bottom-size: var(--scroll-fade-size);
+}
+
+.scroll-fade-x {
+  --scroll-fade-left-size: 0px;
+  --scroll-fade-right-size: 0px;
+  --scroll-fade-left-mid: calc(var(--scroll-fade-left-size) * 0.55);
+  --scroll-fade-right-mid: calc(var(--scroll-fade-right-size) * 0.55);
+  transition:
+    --scroll-fade-left-size 180ms ease-out,
+    --scroll-fade-right-size 180ms ease-out;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    rgb(0 0 0 / 45%) var(--scroll-fade-left-mid),
+    #000 var(--scroll-fade-left-size),
+    #000 calc(100% - var(--scroll-fade-right-size)),
+    rgb(0 0 0 / 45%) calc(100% - var(--scroll-fade-right-mid)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    rgb(0 0 0 / 45%) var(--scroll-fade-left-mid),
+    #000 var(--scroll-fade-left-size),
+    #000 calc(100% - var(--scroll-fade-right-size)),
+    rgb(0 0 0 / 45%) calc(100% - var(--scroll-fade-right-mid)),
+    transparent 100%
+  );
+}
+
+.scroll-fade-x[data-fade-left="1"] {
+  --scroll-fade-left-size: var(--scroll-fade-size);
+}
+
+.scroll-fade-x[data-fade-right="1"] {
+  --scroll-fade-right-size: var(--scroll-fade-size);
+}
+
 @keyframes comms-pop-in {
   0% {
     opacity: 0;

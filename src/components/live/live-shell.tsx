@@ -28,6 +28,53 @@ const SCENE_DIRECTION_KEYWORDS = [
   "tableau",
 ];
 
+function useScrollFade<T extends HTMLElement>(axis: "x" | "y") {
+  const ref = useRef<T | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const threshold = 1;
+    const update = () => {
+      if (axis === "y") {
+        const canScrollY = el.scrollHeight - el.clientHeight > threshold;
+        const showTop = canScrollY && el.scrollTop > threshold;
+        const showBottom = canScrollY && el.scrollTop < el.scrollHeight - el.clientHeight - threshold;
+        el.dataset.fadeTop = showTop ? "1" : "0";
+        el.dataset.fadeBottom = showBottom ? "1" : "0";
+        return;
+      }
+
+      const canScrollX = el.scrollWidth - el.clientWidth > threshold;
+      const showLeft = canScrollX && el.scrollLeft > threshold;
+      const showRight = canScrollX && el.scrollLeft < el.scrollWidth - el.clientWidth - threshold;
+      el.dataset.fadeLeft = showLeft ? "1" : "0";
+      el.dataset.fadeRight = showRight ? "1" : "0";
+    };
+
+    update();
+    const onScroll = () => update();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    const resizeObserver = new ResizeObserver(() => update());
+    resizeObserver.observe(el);
+    const mutationObserver = new MutationObserver(() => {
+      window.requestAnimationFrame(() => update());
+    });
+    mutationObserver.observe(el, { childList: true, subtree: true, characterData: true });
+    window.addEventListener("resize", update);
+
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [axis]);
+
+  return ref;
+}
+
 function isSceneDirectionCue(cue: Cue) {
   if (cue.department === "stage_crew" || cue.department === "stage_left" || cue.department === "stage_right") return true;
   const text = cue.text.toLowerCase();
@@ -71,6 +118,7 @@ function ScriptPanel({
   const lastScrollTargetNonceRef = useRef(scrollTarget?.nonce ?? 0);
   const lastViewActRef = useRef<number | null>(null);
   const viewActRafRef = useRef<number | null>(null);
+  const scriptFadeRef = useScrollFade<HTMLDivElement>("y");
   const scrollAnimRef = useRef<number | null>(null);
   const isProgrammaticScrollRef = useRef(false);
   const wheelActiveUntilRef = useRef(0);
@@ -204,7 +252,10 @@ function ScriptPanel({
   return (
     <div className="flex h-full min-h-0 flex-col rounded-xl border border-zinc-800 bg-zinc-900 p-3">
       <div
-        ref={containerRef}
+        ref={(node) => {
+          containerRef.current = node;
+          scriptFadeRef.current = node;
+        }}
         onWheel={() => {
           wheelActiveUntilRef.current = Date.now() + 140;
         }}
@@ -227,7 +278,7 @@ function ScriptPanel({
           userDirectScrollRef.current = false;
         }}
         onScroll={scheduleViewedActUpdate}
-        className="script-scroll -mr-3 min-h-0 flex-1 overflow-y-scroll pr-3"
+        className="script-scroll scroll-fade-y scroll-fade-y-strong -mr-3 min-h-0 flex-1 overflow-y-scroll pr-3"
       >
         <div className="space-y-2">
         {visibleLines.map((line, index) => {
@@ -497,6 +548,9 @@ function CommunicationsPanel({
   const historyInitRef = useRef(false);
   const seenHistoryIdsRef = useRef<Set<string>>(new Set());
   const [enteringIds, setEnteringIds] = useState<string[]>([]);
+  const historyFadeRef = useScrollFade<HTMLDivElement>("y");
+  const quickMessagesFadeRef = useScrollFade<HTMLDivElement>("x");
+  const sendToFadeRef = useScrollFade<HTMLDivElement>("y");
 
   useEffect(() => {
     const el = historyRef.current;
@@ -548,14 +602,17 @@ function CommunicationsPanel({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-b border-zinc-700/60 p-2">
         <p className="text-base font-semibold text-zinc-100">Communications</p>
         <div
-          ref={historyRef}
+          ref={(node) => {
+            historyRef.current = node;
+            historyFadeRef.current = node;
+          }}
           onScroll={() => {
             const el = historyRef.current;
             if (!el) return;
             const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
             shouldStickToBottomRef.current = distanceToBottom <= 12;
           }}
-          className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1"
+          className="scroll-fade-y mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1"
         >
           {history.length ? (
             history.map((item) => {
@@ -644,7 +701,11 @@ function CommunicationsPanel({
             </div>
           ) : null}
 
-          <div className="min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-1 pt-1 [scrollbar-gutter:stable]" style={{ touchAction: "pan-x" }}>
+          <div
+            ref={quickMessagesFadeRef}
+            className="scroll-fade-x min-w-0 max-w-full overflow-x-auto overflow-y-hidden pb-1 pt-1 [scrollbar-gutter:stable]"
+            style={{ touchAction: "pan-x" }}
+          >
             <div className="comms-quick-grid grid w-max min-w-full content-start grid-flow-col auto-cols-max grid-rows-2 gap-x-1.5 gap-y-1.5 pr-1">
               <button
                 onClick={() => setComposerOpen((prev) => !prev)}
@@ -669,7 +730,7 @@ function CommunicationsPanel({
 
         <div className="flex min-w-0 max-w-full flex-col p-0">
           <p className="mb-0.5 text-sm font-semibold text-zinc-200">Send to:</p>
-          <div className="overflow-x-hidden overflow-y-auto">
+          <div ref={sendToFadeRef} className="scroll-fade-y overflow-x-hidden overflow-y-auto">
             <div className="comms-send-grid grid w-full grid-cols-2 gap-1">
             <button
               onClick={() => setTarget("all")}
@@ -722,6 +783,7 @@ function ActSidebar({
   const lastPressAtRef = useRef(0);
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const roleMenuRootRef = useRef<HTMLDivElement | null>(null);
+  const roleMenuFadeRef = useScrollFade<HTMLDivElement>("y");
   const router = useRouter();
   const roleOptions: DepartmentRole[] = ["director", "lighting", "sound", "stage_left", "stage_right", "stage_crew"];
 
@@ -786,7 +848,7 @@ function ActSidebar({
         <div ref={roleMenuRootRef} className="relative flex w-full min-w-0 flex-col items-stretch gap-2">
           {roleMenuOpen ? (
             <div className="absolute bottom-full left-0 z-40 mb-2 w-[11rem] rounded-md border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
-              <div className="max-h-40 overflow-y-auto">
+              <div ref={roleMenuFadeRef} className="scroll-fade-y max-h-40 overflow-y-auto">
                 {roleOptions.map((option) => (
                   <button
                     key={option}
